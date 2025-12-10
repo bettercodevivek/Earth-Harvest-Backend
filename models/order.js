@@ -24,6 +24,7 @@ const orderSchema = new mongoose.Schema({
         country: String,
         zipCode: Number
     },
+    amountPaid:String,
     paymentId: String,
     paymentStatus: {
         type: String,
