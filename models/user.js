@@ -13,6 +13,9 @@ const userSchema = new mongoose.Schema({
         zipCode: Number
     },
     otp: Number,
+    otpExpiry : {
+        type: Date
+    }
 },{timestamps: true});
 
 userSchema.index({email:1});
