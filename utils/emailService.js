@@ -2,21 +2,16 @@ const nodemailer = require('nodemailer');
 
 // Create transporter with better configuration
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT) || 587,
-  secure: false, // true for 465, false for other ports
+  host: process.env.SMTP_HOST || "smtp.gmail.com",
+  port: Number(process.env.SMTP_PORT) || 465,
+  secure: true, // MUST be true for 465
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  tls: {
-    rejectUnauthorized: false // For development only
-  },
-  connectionTimeout: 10000, // 10 seconds
+  connectionTimeout: 10000,
   greetingTimeout: 10000,
   socketTimeout: 10000,
-  debug: process.env.NODE_ENV === 'development',
-  logger: process.env.NODE_ENV === 'development'
 });
 
 // Verify transporter configuration (only in production or when explicitly enabled)
