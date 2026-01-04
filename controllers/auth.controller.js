@@ -1,5 +1,6 @@
 const User = require('../models/user');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const { sendOTPEmail } = require('../utils/emailService');
 
 /**
@@ -66,12 +67,30 @@ exports.sendOTP = async (req, res) => {
     await user.save();
 
     // Send OTP via email
+    let emailResult;
     try {
-      await sendOTPEmail(email, otp, user.name);
+      emailResult = await sendOTPEmail(email, otp, user.name);
+      // If dev mode returned, it's still successful
+      if (emailResult && emailResult.devOtp) {
+        console.log(`✅ OTP generated (dev mode). Check console for OTP code.`);
+      }
     } catch (emailError) {
-      console.error('Email sending failed:', emailError);
-      // Still return success but log the error
-      // In production, you might want to handle this differently
+      console.error('Email sending failed:', emailError.message || emailError);
+      
+      // In development or if ALLOW_DEV_OTP is set, allow OTP to be shown in console
+      if (process.env.NODE_ENV === 'development' || process.env.ALLOW_DEV_OTP === 'true') {
+        console.log(`\n🔑 ==========================================`);
+        console.log(`🔑 DEV MODE: OTP for ${email}`);
+        console.log(`🔑 OTP Code: ${otp}`);
+        console.log(`🔑 ==========================================\n`);
+        // Continue - don't fail the request in dev mode
+      } else {
+        // In production, return error if email fails
+        return res.status(500).json({
+          success: false,
+          message: emailError.message || "Failed to send OTP email. Please check your email configuration."
+        });
+      }
     }
 
     res.status(200).json({
@@ -82,6 +101,121 @@ exports.sendOTP = async (req, res) => {
 
   } catch (error) {
     console.error("Error in sendOTP:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+/**
+ * Check if email belongs to an admin (public endpoint for frontend)
+ */
+exports.checkAdminEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required"
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        isAdmin: false
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      isAdmin: user.role === 'admin' && !!user.password
+    });
+
+  } catch (error) {
+    console.error("Error in checkAdminEmail:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+/**
+ * Admin login with password
+ */
+exports.adminLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required"
+      });
+    }
+
+    // Find user and include password field
+    const user = await User.findOne({ email }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password"
+      });
+    }
+
+    // Check if user is admin
+    if (user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: "Admin access required. Please use OTP login for regular users."
+      });
+    }
+
+    // Check if password is set
+    if (!user.password) {
+      return res.status(401).json({
+        success: false,
+        message: "Password not set. Please contact administrator to set your password."
+      });
+    }
+
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password"
+      });
+    }
+
+    // Update last login and verification status
+    user.isVerified = true;
+    await user.save();
+
+    // Generate JWT token
+    const token = generateToken(user._id);
+
+    res.status(200).json({
+      success: true,
+      message: "Login successful",
+      token: token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in adminLogin:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error"

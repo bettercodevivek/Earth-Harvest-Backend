@@ -1,27 +1,40 @@
 const nodemailer = require('nodemailer');
 
-// Create transporter
+// Create transporter with better configuration
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
+  port: parseInt(process.env.SMTP_PORT) || 587,
   secure: false, // true for 465, false for other ports
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  tls: {
+    rejectUnauthorized: false // For development only
+  },
+  connectionTimeout: 10000, // 10 seconds
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
+  debug: process.env.NODE_ENV === 'development',
+  logger: process.env.NODE_ENV === 'development'
 });
 
-// Verify transporter configuration
-transporter.verify(function (error, success) {
-  if (error) {
-    console.log('Email service error:', error);
-  console.log('Please configure SMTP_USER and SMTP_PASS in your .env file');
-  console.log('For Gmail, you may need to use an App Password instead of your regular password');
-  console.log('For development, you can use services like Mailtrap or Ethereal Email');
-  } else {
-    console.log('Email service is ready to send emails');
-  }
-});
+// Verify transporter configuration (only in production or when explicitly enabled)
+if (process.env.VERIFY_EMAIL_SERVICE !== 'false') {
+  transporter.verify(function (error, success) {
+    if (error) {
+      console.log('⚠️  Email service configuration issue:', error.message);
+      console.log('📧 Please configure SMTP_USER and SMTP_PASS in your .env file');
+      console.log('🔐 For Gmail, you need to:');
+      console.log('   1. Enable 2-Step Verification');
+      console.log('   2. Generate an App Password at: https://myaccount.google.com/apppasswords');
+      console.log('   3. Use the App Password (not your regular password)');
+      console.log('💡 For development, set VERIFY_EMAIL_SERVICE=false to skip verification');
+    } else {
+      console.log('✅ Email service is ready to send emails');
+    }
+  });
+}
 
 /**
  * Send OTP email to user
@@ -30,6 +43,18 @@ transporter.verify(function (error, success) {
  * @param {string} name - User name
  */
 const sendOTPEmail = async (email, otp, name) => {
+  // Check if email service is configured
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.warn('⚠️  Email service not configured. OTP would be:', otp);
+    console.warn('📧 In development, you can check the console for the OTP');
+    // In development, we can still proceed without actually sending email
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🔑 OTP for ${email}: ${otp}`);
+      return { success: true, messageId: 'dev-mode', devOtp: otp };
+    }
+    throw new Error('Email service not configured. Please set SMTP_USER and SMTP_PASS in .env');
+  }
+
   try {
     const mailOptions = {
       from: `"Earth & Harvest" <${process.env.SMTP_USER}>`,
@@ -113,10 +138,30 @@ const sendOTPEmail = async (email, otp, name) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log('OTP email sent:', info.messageId);
+    console.log('✅ OTP email sent successfully:', info.messageId);
     return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error('Error sending OTP email:', error);
+    console.error('❌ Error sending OTP email:', error.message);
+    
+    // Provide helpful error messages
+    if (error.code === 'EAUTH') {
+      throw new Error('Email authentication failed. Please check your SMTP credentials.');
+    } else if (error.code === 'ETIMEDOUT' || error.code === 'ESOCKET') {
+      throw new Error('Email service connection timeout. Please check your network and SMTP settings.');
+    } else if (error.code === 'ECONNREFUSED') {
+      throw new Error('Email service connection refused. Please check SMTP_HOST and SMTP_PORT.');
+    }
+    
+    // In development, log the OTP so user can still test
+    if (process.env.NODE_ENV === 'development' || process.env.ALLOW_DEV_OTP === 'true') {
+      console.log(`\n🔑 ==========================================`);
+      console.log(`🔑 DEV MODE: OTP for ${email}`);
+      console.log(`🔑 OTP Code: ${otp}`);
+      console.log(`🔑 ==========================================\n`);
+      console.log('💡 Configure email service (SMTP_USER, SMTP_PASS) to receive OTP via email');
+      return { success: true, messageId: 'dev-mode', devOtp: otp };
+    }
+    
     throw error;
   }
 };

@@ -92,3 +92,65 @@ exports.getFeaturedProducts = async (req, res) => {
   }
 };
 
+/**
+ * Add review to product (protected route)
+ */
+exports.addReview = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userName, dogBreed, sizePurchased, rating, title, content, images } = req.body;
+    const userId = req.user.id; // From auth middleware
+
+    // Validate required fields
+    if (!userName || !rating || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "User name and rating (1-5) are required"
+      });
+    }
+
+    const product = await Product.findById(id);
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    // Create review
+    const newReview = {
+      userName,
+      dogBreed: dogBreed || "",
+      sizePurchased: sizePurchased || "",
+      rating: parseInt(rating),
+      title: title || "",
+      content: content || "",
+      images: images || [],
+      helpfulCount: 0,
+      date: new Date()
+    };
+
+    product.reviews.push(newReview);
+
+    // Recalculate rating and total reviews
+    const totalRating = product.reviews.reduce((sum, r) => sum + r.rating, 0);
+    product.rating = totalRating / product.reviews.length;
+    product.totalReviews = product.reviews.length;
+
+    await product.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Review added successfully",
+      data: newReview
+    });
+
+  } catch (error) {
+    console.error("Add review error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
